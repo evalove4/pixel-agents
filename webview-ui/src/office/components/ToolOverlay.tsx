@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 
 import { Button } from '../../components/ui/Button.js';
 import {
@@ -19,6 +19,7 @@ import {
   TOOL_OVERLAY_VERTICAL_OFFSET,
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
+import { LocaleContext } from '../../LocaleContext.js';
 import type { OfficeState } from '../engine/officeState.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState, TILE_SIZE } from '../types.js';
@@ -27,7 +28,6 @@ import { CharacterState, TILE_SIZE } from '../types.js';
 // shows ONLY the checkmark (the label falls through to its normal idle text);
 // going idle waiting on the user (Notification(idle_prompt)) additionally
 // surfaces this label. Driven by Character.waitingAwaitingInput.
-const WAITING_INPUT_ACTIVITY_TEXT = 'Waiting for input';
 
 interface ToolOverlayProps {
   officeState: OfficeState;
@@ -41,6 +41,11 @@ interface ToolOverlayProps {
   alwaysShowOverlay: boolean;
 }
 
+interface Tr {
+  t: (key: 'needsApproval' | 'waitingForInput' | 'idle') => string;
+  translateStatus: (status: string) => string;
+}
+
 /** Derive a short human-readable activity string from tools/status */
 function getActivityText(
   agentId: number,
@@ -48,29 +53,30 @@ function getActivityText(
   isActive: boolean,
   bubbleType: 'permission' | 'waiting' | null,
   waitingAwaitingInput: boolean,
+  tr: Tr,
 ): string {
-  if (bubbleType === 'permission') return 'Needs approval';
+  if (bubbleType === 'permission') return tr.t('needsApproval');
   // Only the idle case ("Waiting for input") gets a dedicated label. A finished
   // turn (Stop, waitingAwaitingInput=false) falls through so the checkmark alone
   // signals "done", same as the original behavior.
-  if (bubbleType === 'waiting' && waitingAwaitingInput) return WAITING_INPUT_ACTIVITY_TEXT;
+  if (bubbleType === 'waiting' && waitingAwaitingInput) return tr.t('waitingForInput');
 
   const tools = agentTools[agentId];
   if (tools && tools.length > 0) {
     // Find the latest non-done tool
     const activeTool = [...tools].reverse().find((t) => !t.done);
     if (activeTool) {
-      if (activeTool.permissionWait) return 'Needs approval';
-      return activeTool.status;
+      if (activeTool.permissionWait) return tr.t('needsApproval');
+      return tr.translateStatus(activeTool.status);
     }
     // All tools done but agent still active (mid-turn) — keep showing last tool status
     if (isActive) {
       const lastTool = tools[tools.length - 1];
-      if (lastTool) return lastTool.status;
+      if (lastTool) return tr.translateStatus(lastTool.status);
     }
   }
 
-  return 'Idle';
+  return tr.t('idle');
 }
 
 function getFuelColor(ratio: number): string {
@@ -91,6 +97,9 @@ export function ToolOverlay({
   onCloseAgent,
   alwaysShowOverlay,
 }: ToolOverlayProps) {
+  const localeCtx = useContext(LocaleContext);
+  const tr: Tr = { t: localeCtx.t, translateStatus: localeCtx.translateStatus };
+
   const [, setTick] = useState(0);
   useEffect(() => {
     let rafId = 0;
@@ -165,13 +174,13 @@ export function ToolOverlay({
         if (hasWaitingBubble && ch.waitingAwaitingInput) {
           // Idle, waiting on the user -> dedicated label. A finished turn (Stop)
           // shows only the checkmark and falls through to the normal idle text.
-          activityText = WAITING_INPUT_ACTIVITY_TEXT;
+          activityText = localeCtx.t('waitingForInput');
         } else if (isSub) {
           if (subHasPermission) {
-            activityText = 'Needs approval';
+            activityText = localeCtx.t('needsApproval');
           } else {
             const sub = subagentCharacters.find((s) => s.id === id);
-            activityText = sub ? sub.label : 'Subtask';
+            activityText = sub ? localeCtx.translateStatus(sub.label) : localeCtx.t('subtask');
           }
         } else {
           activityText = getActivityText(
@@ -180,6 +189,7 @@ export function ToolOverlay({
             ch.isActive,
             ch.bubbleType,
             ch.waitingAwaitingInput ?? false,
+            tr,
           );
         }
 
@@ -261,7 +271,7 @@ export function ToolOverlay({
                     e.stopPropagation();
                     onCloseAgent(id);
                   }}
-                  title="Close agent"
+                  title={localeCtx.t('closeAgent')}
                   className="ml-2 shrink-0 leading-none"
                 >
                   ×

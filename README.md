@@ -2,6 +2,8 @@
 
 ## 개요
 
+![koreanized](docs/koreanized.png)
+
 **OpenCode 프로바이더 통합** — pixel-agents가 Claude Code 외에 OpenCode(Bun 기반 AI 코딩 에이전트)를 두 번째 훅 프로바이더로 지원하도록 다중 프로바이더 아키텍처를 구현했습니다.
 
 ---
