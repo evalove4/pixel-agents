@@ -20,6 +20,7 @@ import {
   ensureProjectScan,
   isTrackedProjectDir,
   reassignAgentToFile,
+  registerTrackedDir,
   scanForTeammateFiles,
   setAgentRemovalCallback,
   setDismissalTracker,
@@ -72,6 +73,7 @@ export class AgentRuntime {
   constructor(
     private readonly store: AgentStateStore,
     provider: HookProvider,
+    additionalProviders?: HookProvider[],
   ) {
     // Wire module-level dependencies
     setDismissalTracker(this.dismissalTracker);
@@ -83,6 +85,13 @@ export class AgentRuntime {
     setAgentRemovalCallback((id) => this.removeAgent(id));
     setTeammateRemovalCallback((id) => this.removeTeammate(id, 'team-config'));
 
+    // Build provider registry so HookEventHandler can route by providerId
+    const providerRegistry = new Map<string, HookProvider>();
+    providerRegistry.set(provider.id, provider);
+    for (const p of additionalProviders ?? []) {
+      providerRegistry.set(p.id, p);
+    }
+
     this.hookEventHandler = new HookEventHandler(
       store,
       this.waitingTimers,
@@ -90,6 +99,7 @@ export class AgentRuntime {
       provider,
       new SessionRouter(),
       this.watchAllSessions,
+      providerRegistry,
     );
 
     // Wire hook lifecycle callbacks to shared agent operations
@@ -266,6 +276,15 @@ export class AgentRuntime {
   }
 
   // ── Scanning ──
+
+  /**
+   * Register a workspace directory as tracked so hook-based providers
+   * (e.g. OpenCode) whose cwd is the workspace root are auto-detected
+   * without needing Watch All Sessions enabled.
+   */
+  registerWorkspaceDir(dir: string): void {
+    registerTrackedDir(dir);
+  }
 
   /** Start project-level scanning for a directory. */
   startProjectScan(projectDir: string, onAgentCreated?: (agent: AgentState) => void): void {

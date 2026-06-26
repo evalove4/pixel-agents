@@ -37,9 +37,15 @@ function copyAssets() {
 /**
  * Bundle hook scripts (TypeScript) to dist/hooks via esbuild.
  * Produces a self-contained CJS file with shebang for Claude Code to execute.
+ *
+ * Also copies the OpenCode plugin (.mjs) which is pure ESM and runs in Bun's
+ * runtime — it does not need bundling, just a straight file copy.
  */
 function buildHooks() {
-  const entry = path.join(
+  const hooksOutDir = path.join(__dirname, 'dist', 'hooks');
+
+  // ── Claude hook (Node.js CJS bundle) ──
+  const claudeEntry = path.join(
     __dirname,
     'server',
     'src',
@@ -49,17 +55,37 @@ function buildHooks() {
     'hooks',
     'claude-hook.ts',
   );
-  if (!fs.existsSync(entry)) return;
-  require('esbuild').buildSync({
-    entryPoints: [entry],
-    bundle: true,
-    platform: 'node',
-    target: 'node18',
-    format: 'cjs',
-    outdir: path.join(__dirname, 'dist', 'hooks'),
-    banner: { js: '#!/usr/bin/env node' },
-  });
-  console.log('✓ Built hooks/ → dist/hooks/');
+  if (fs.existsSync(claudeEntry)) {
+    require('esbuild').buildSync({
+      entryPoints: [claudeEntry],
+      bundle: true,
+      platform: 'node',
+      target: 'node18',
+      format: 'cjs',
+      outdir: hooksOutDir,
+      banner: { js: '#!/usr/bin/env node' },
+    });
+    console.log('✓ Built hooks/claude-hook.js → dist/hooks/');
+  }
+
+  // ── OpenCode plugin (Bun ESM — copy as-is, no bundling) ──
+  const opencodePluginSrc = path.join(
+    __dirname,
+    'server',
+    'src',
+    'providers',
+    'hook',
+    'opencode',
+    'hooks',
+    'opencode-plugin.mjs',
+  );
+  if (fs.existsSync(opencodePluginSrc)) {
+    if (!fs.existsSync(hooksOutDir)) {
+      fs.mkdirSync(hooksOutDir, { recursive: true });
+    }
+    fs.copyFileSync(opencodePluginSrc, path.join(hooksOutDir, 'opencode-plugin.mjs'));
+    console.log('✓ Copied hooks/opencode-plugin.mjs → dist/hooks/');
+  }
 }
 
 /**

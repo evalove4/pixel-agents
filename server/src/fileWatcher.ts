@@ -250,6 +250,16 @@ export function isTrackedProjectDir(dir: string): boolean {
 }
 
 /**
+ * Register a directory as tracked without starting a JSONL scan.
+ * Used to register VS Code workspace folders so that hook-based providers
+ * (e.g. OpenCode) whose cwd is the workspace root can be detected as
+ * external sessions without enabling Watch All Sessions.
+ */
+export function registerTrackedDir(dir: string): void {
+  trackedProjectDirs.add(dir);
+}
+
+/**
  * Seed a project directory's known files and register it for periodic scanning.
  * Can be called multiple times with different directories — all will be scanned
  * by the single shared interval timer.

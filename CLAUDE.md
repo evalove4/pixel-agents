@@ -429,7 +429,7 @@ Three tiers, each with its own framework.
 | `server.test.ts`               | HTTP lifecycle, auth, `/ws`, broadcast                              |
 | `mockClaudeRunner.test.ts`     | E2E scenario runner sanity                                          |
 
-Run: `npm run test:server` (or `npm test` for all).
+Run: `npm run test:server` (or `npm test` for all). To run a single file: `npx vitest run server/__tests__/agentStateStore.test.ts`. To filter by name: `npx vitest run --grep "session routing"`.
 
 ### Webview unit (Vitest, Node runner)
 
@@ -477,7 +477,7 @@ npm run test:report:open                       # serve Allure locally (file:// c
 
 ## Build & Dev
 
-**npm workspaces monorepo** (`server`, `webview-ui`). A single `npm install` at the root installs deps for all workspaces; `cd webview-ui && npm install` is redundant.
+**npm workspaces monorepo** (`server`, `webview-ui`). A single `npm install` at the root installs deps for all workspaces; `cd webview-ui && npm install` is redundant. Requires **Node.js v22** (see `.nvmrc`).
 
 ```bash
 npm install                # installs root + workspaces in one shot
@@ -486,6 +486,13 @@ npm run build              # alias for compile
 npm run package            # production build (esbuild --production)
 npm test                   # webview + server vitest
 npm run e2e                # Playwright
+```
+
+To package as a `.vsix` for end-to-end local testing (installs like a real user):
+
+```bash
+npx @vscode/vsce package --allow-star-activation --out pixel-agents-local.vsix
+code --install-extension ./pixel-agents-local.vsix --force
 ```
 
 `esbuild.js` runs three bundles:

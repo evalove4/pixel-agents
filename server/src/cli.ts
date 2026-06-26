@@ -22,7 +22,12 @@ import {
 } from './assetLoader.js';
 import type { AssetCache } from './clientMessageHandler.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
-import { claudeProvider, copyHookScript } from './providers/index.js';
+import {
+  claudeProvider,
+  copyHookScript,
+  copyPluginFile,
+  opencodeProvider,
+} from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 
 // ── Argument parsing ──────────────────────────────────────────
@@ -90,7 +95,7 @@ async function main(): Promise<void> {
 
   try {
     // Create runtime first (before server.start, so we can pass it in)
-    const runtime = new AgentRuntime(store, claudeProvider);
+    const runtime = new AgentRuntime(store, claudeProvider, [opencodeProvider]);
 
     // Wire hook events: HTTP POST -> runtime -> hookEventHandler -> agents
     server.onHookEvent((providerId, event) => {
@@ -103,14 +108,15 @@ async function main(): Promise<void> {
     const onSetHooksEnabled = async (enabled: boolean): Promise<void> => {
       if (!currentConfig) return;
       if (enabled) {
-        await claudeProvider.installHooks(
-          `http://127.0.0.1:${currentConfig.port}`,
-          currentConfig.token,
-        );
+        const serverUrl = `http://127.0.0.1:${currentConfig.port}`;
+        await claudeProvider.installHooks(serverUrl, currentConfig.token);
         copyHookScript(distRoot);
+        await opencodeProvider.installHooks(serverUrl, currentConfig.token);
+        copyPluginFile(distRoot);
         console.log('[Pixel Agents] Hooks installed (user toggle)');
       } else {
         await claudeProvider.uninstallHooks();
+        await opencodeProvider.uninstallHooks();
         console.log('[Pixel Agents] Hooks uninstalled (user toggle)');
       }
     };
@@ -134,8 +140,11 @@ async function main(): Promise<void> {
     // Install hooks on startup if the persisted setting says so
     if (runtime.hooksEnabled.current) {
       try {
-        await claudeProvider.installHooks(`http://127.0.0.1:${config.port}`, config.token);
+        const serverUrl = `http://127.0.0.1:${config.port}`;
+        await claudeProvider.installHooks(serverUrl, config.token);
         copyHookScript(distRoot);
+        await opencodeProvider.installHooks(serverUrl, config.token);
+        copyPluginFile(distRoot);
         console.log('[Pixel Agents] Hooks installed');
       } catch (err) {
         console.error('[Pixel Agents] Failed to install hooks:', err);
