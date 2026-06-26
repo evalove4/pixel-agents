@@ -1,211 +1,173 @@
-<h1 align="center">
-    <a href="https://github.com/pixel-agents-hq/pixel-agents/discussions">
-        <img src="webview-ui/public/banner.png" alt="Pixel Agents">
-    </a>
-</h1>
+# 작업 보고서 — 2026-06-26
 
-<h2 align="center" style="padding-bottom: 20px;">
-  The game interface where AI agents build real things
-</h2>
+## 개요
 
-<div align="center" style="margin-top: 25px;">
+**OpenCode 프로바이더 통합** — pixel-agents가 Claude Code 외에 OpenCode(Bun 기반 AI 코딩 에이전트)를 두 번째 훅 프로바이더로 지원하도록 다중 프로바이더 아키텍처를 구현했습니다.
 
-[![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fpablodelucca%2F3cd28398fa4a2c0a636e1d51d41aee39%2Fraw%2Fversion.json)](https://github.com/pixel-agents-hq/pixel-agents/releases)
-[![marketplaces](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fpablodelucca%2F3cd28398fa4a2c0a636e1d51d41aee39%2Fraw%2Finstalls.json)](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents)
-[![stars](https://img.shields.io/github/stars/pixel-agents-hq/pixel-agents?logo=github&color=0183ff&style=flat)](https://github.com/pixel-agents-hq/pixel-agents/stargazers)
-[![license](https://img.shields.io/github/license/pixel-agents-hq/pixel-agents?color=0183ff&style=flat)](https://github.com/pixel-agents-hq/pixel-agents/blob/main/LICENSE)
-[![good first issues](https://img.shields.io/github/issues/pixel-agents-hq/pixel-agents/good%20first%20issue?color=7057ff&label=good%20first%20issues)](https://github.com/pixel-agents-hq/pixel-agents/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
+---
 
-</div>
+## 변경 파일 목록
 
-<div align="center">
-<a href="https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents">🛒 VS Code Marketplace</a> • <a href="https://github.com/pixel-agents-hq/pixel-agents/discussions">💬 Discussions</a> • <a href="https://github.com/pixel-agents-hq/pixel-agents/issues">🐛 Issues</a> • <a href="CONTRIBUTING.md">🤝 Contributing</a> • <a href="CHANGELOG.md">📋 Changelog</a>
-</div>
+| 파일                                                           | 상태 |
+| -------------------------------------------------------------- | ---- |
+| `server/src/providers/hook/opencode/opencode.ts`               | 신규 |
+| `server/src/providers/hook/opencode/opencodeHookInstaller.ts`  | 신규 |
+| `server/src/providers/hook/opencode/constants.ts`              | 신규 |
+| `server/src/providers/hook/opencode/hooks/opencode-plugin.mjs` | 신규 |
+| `server/src/providers/index.ts`                                | 수정 |
+| `server/src/hookEventHandler.ts`                               | 수정 |
+| `server/src/agentRuntime.ts`                                   | 수정 |
+| `server/src/fileWatcher.ts`                                    | 수정 |
+| `server/src/cli.ts`                                            | 수정 |
+| `adapters/vscode/PixelAgentsViewProvider.ts`                   | 수정 |
+| `esbuild.js`                                                   | 수정 |
 
-<br/>
+---
 
-Pixel Agents turns multi-agent AI systems into something you can actually see and manage. Each agent becomes a character in a pixel art office. They walk around, sit at their desk, and visually reflect what they are doing — typing when writing code, reading when searching files, waiting when it needs your attention.
+## 주요 작업 내용
 
-It ships in **two flavors from the same source tree**:
+### 1. OpenCode 프로바이더 구현 (`server/src/providers/hook/opencode/`)
 
-- **VS Code extension** — `pablodelucca.pixel-agents` on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents) and [Open VSX](https://open-vsx.org/extension/pablodelucca/pixel-agents). Agents spawn into VS Code terminals; characters render in the panel area.
-- **Standalone CLI** — `npx pixel-agents` runs a local Fastify server and serves the office as a browser SPA. Useful in tmux workflows, remote sessions, or any environment without a desktop VS Code.
+기존 Claude 프로바이더와 동일한 `HookProvider` 인터페이스를 구현하는 새 프로바이더 디렉터리를 생성했습니다.
 
-Internally, the architecture is fully agent-agnostic and platform-agnostic: a typed `HookProvider` interface defines the integration boundary so adding a new AI tool is a single subdirectory of code. Claude Code is the reference implementation today; Codex, Gemini, Cursor, and others are on the roadmap.
+#### `opencode.ts` — HookProvider 구현
 
-![Pixel Agents screenshot](webview-ui/public/Screenshot.jpg)
+- **`normalizeHookEvent()`**: OpenCode 플러그인이 POST하는 페이로드를 표준 `AgentEvent` 유니온으로 변환
+  - `ToolBefore` → `toolStart`
+  - `ToolAfter` → `toolEnd`
+  - `SessionIdle` → `turnEnd`
+  - `SessionCreated` → `sessionStart`
+  - `SessionDeleted` → `sessionEnd`
+  - `PermissionAsked` → `permissionRequest`
+- **`formatToolStatus()`**: OpenCode의 소문자 snake_case 툴 이름(`read`, `write`, `bash`, `glob`, `grep`, `fetch` 등)을 UI 표시 텍스트로 변환
+- **`permissionExemptTools`**: `task`, `agent`, `computer` — 권한 타이머를 발동시키지 않는 툴 목록
+- **`subagentToolNames`**: `task`, `agent`
+- **`readingTools`**: `read`, `read_file`, `glob`, `list_files`, `find_files`, `grep`, `search_files`, `fetch` 등
+- **`getAllSessionRoots()`**: 스테일 체크 스캐너를 위한 OpenCode 세션 디렉터리 경로 제공 (`~/.local/share/opencode/storage` 또는 Windows `%LOCALAPPDATA%\opencode\storage`)
+- **`buildLaunchCommand()`**: `opencode run --session <sessionId>` 명령 반환
 
-## Features
+#### `opencodeHookInstaller.ts` — 플러그인 설치/제거
 
-- **One agent, one character** — every Claude Code terminal gets its own animated character
-- **Live activity tracking** — characters animate based on what the agent is actually doing (writing, reading, running commands)
-- **Office layout editor** — design your office with floors, walls, and furniture using a built-in editor
-- **Speech bubbles** — visual indicators when an agent is waiting for input or needs permission
-- **Sound notifications** — optional chime when an agent finishes its turn
-- **Sub-agent visualization** — Task tool sub-agents spawn as separate characters linked to their parent
-- **Persistent layouts** — your office design is saved and shared across VS Code windows
-- **External asset directories** — load custom or third-party furniture packs from any folder on your machine
-- **Diverse characters** — 6 diverse characters. These are based on the amazing work of [JIK-A-4, Metro City](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack).
+- OpenCode 설정 파일(`~/.config/opencode/opencode.json`)의 `plugin[]` 배열에 플러그인 경로를 등록/제거
+- **`installHooks()`**: `~/.pixel-agents/hooks/opencode-plugin.mjs` 경로를 설정에 추가 (멱등성 보장 — 기존 항목 제거 후 재추가)
+- **`uninstallHooks()`**: 설정에서 pixel-agents 플러그인 항목 제거
+- **`areHooksInstalled()`**: 플러그인 파일 존재 여부 + 설정 등록 여부 확인
+- **`copyPluginFile()`**: 익스텐션 번들(`dist/hooks/opencode-plugin.mjs`)을 `~/.pixel-agents/hooks/`로 복사
+- 레거시 `"plugins"` 키(구버전 설치) 자동 정리
+- 설정 파일 쓰기는 tmp 파일 → rename 방식으로 원자적 처리
 
-<p align="center">
-  <img src="webview-ui/public/characters.png" alt="Pixel Agents characters" width="320" height="72" style="image-rendering: pixelated;">
-</p>
+#### `hooks/opencode-plugin.mjs` — OpenCode 플러그인 스크립트 (Bun ESM)
 
-## Requirements
+- OpenCode 내부에서 Bun ESM 런타임으로 실행되는 플러그인
+- `~/.pixel-agents/server.json`을 읽어 실행 중인 서버의 포트/토큰을 확인
+- `http://127.0.0.1:{port}/api/hooks/opencode`로 표준화된 이벤트 페이로드를 POST
+- 구독 이벤트: `tool.execute.before`, `tool.execute.after`, `session.created`, `session.deleted`, `session.idle`, `permission.asked`
+- 세션 최초 툴 이벤트 시 합성 `SessionCreated` 이벤트 자동 발생 (OpenCode v1에 `session.created` 훅이 없을 경우 대비)
+- 에러는 모두 무시 — 훅이 에이전트 동작을 절대 중단시키지 않도록 방어
 
-- VS Code 1.105.0 or later
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and configured
-- **Platform**: Windows, Linux, and macOS are supported
+---
 
-## Getting Started
+### 2. 다중 프로바이더 아키텍처 (`agentRuntime.ts`, `hookEventHandler.ts`)
 
-If you just want to use Pixel Agents, the easiest way is to download the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents). If you want to play with the code, develop, or contribute, then:
+기존 단일 프로바이더 구조를 여러 프로바이더를 동시에 처리할 수 있도록 확장했습니다.
 
-### Install from source
+#### `AgentRuntime` 생성자 변경
 
-```bash
-git clone https://github.com/pixel-agents-hq/pixel-agents.git
-cd pixel-agents
-npm install      # npm workspaces installs root + server + webview-ui in one shot
-npm run build
+```typescript
+// 이전
+constructor(store, provider: HookProvider)
+
+// 이후
+constructor(store, provider: HookProvider, additionalProviders?: HookProvider[])
 ```
 
-Then press **F5** in VS Code to launch the Extension Development Host.
+- 프라이머리 프로바이더 + 추가 프로바이더들을 `Map<providerId, HookProvider>`로 구성하여 `HookEventHandler`에 전달
 
-To try the **standalone CLI** locally:
+#### `HookEventHandler` 프로바이더 라우팅
 
-```bash
-node dist/cli.js                 # or npx pixel-agents [--port 3100] after publish
+- `handleEvent(providerId, event)` — `_providerId`로 방치되던 파라미터를 실제로 활용
+- `providerRegistry.get(providerId)`로 이벤트를 보낸 프로바이더를 조회하고, 해당 프로바이더의 `normalizeHookEvent()` / `formatToolStatus()`를 사용
+- 알 수 없는 `providerId`는 프라이머리 프로바이더로 폴백하여 하위 호환성 유지
+
+#### `registerWorkspaceDir()` 신규 메서드 (`agentRuntime.ts`)
+
+- VS Code 워크스페이스 폴더를 추적 대상 디렉터리로 등록
+- OpenCode처럼 JSONL 트랜스크립트가 없는 훅 전용 프로바이더의 세션을 Watch All Sessions 없이도 외부 세션으로 감지 가능
+
+---
+
+### 3. `fileWatcher.ts` — `registerTrackedDir()` 추가
+
+```typescript
+export function registerTrackedDir(dir: string): void {
+  trackedProjectDirs.add(dir);
+}
 ```
 
-It starts the Fastify server, opens the webview SPA at `http://localhost:3100`, and (in the same `~/.pixel-agents/` namespace) shares your hooks and layout with the VS Code extension if both are running.
+- JSONL 스캔을 시작하지 않고 디렉터리만 추적 목록에 등록
+- 훅 전용 프로바이더(OpenCode)의 `cwd` 검증에 사용
 
-### Browser Preview & Hosted Reports
+---
 
-The browser-preview version of the webview can be built and staged for Vercel separately from the VS Code extension build.
+### 4. VS Code 어댑터 통합 (`PixelAgentsViewProvider.ts`)
 
-```bash
-npm run test
-npm run e2e
-npm run e2e -- --attach-videos-on-success
-npm run vercel:prepare
+- `AgentRuntime` 생성 시 `opencodeProvider`를 두 번째 프로바이더로 전달
+- 훅 활성화/비활성화 시 Claude + OpenCode 양쪽 모두 처리
+- `providerCapabilities` 메시지: 두 프로바이더의 `readingTools`, `subagentToolNames`를 `Set` 합집합으로 머지하여 웹뷰에 전달
+- 워크스페이스 폴더 활성화 시 `registerWorkspaceDir()` 호출 (모든 워크스페이스 폴더 대상)
+
+---
+
+### 5. CLI 통합 (`cli.ts`)
+
+- `npx pixel-agents` 실행 시에도 동일하게 `opencodeProvider`를 등록
+- 훅 설치/제거, 시작 시 자동 설치 로직에 OpenCode 포함
+
+---
+
+### 6. 빌드 시스템 (`esbuild.js`)
+
+```
+이전: Claude 훅 스크립트만 번들 (claude-hook.ts → claude-hook.js, CJS)
+
+이후:
+  - Claude 훅: 동일 (esbuild 번들, CJS)
+  - OpenCode 플러그인: 번들 없이 파일 복사 (opencode-plugin.mjs → dist/hooks/, ESM 그대로)
 ```
 
-Run `npm run test:report` separately when you want the combined Allure report locally without preparing the full Vercel output.
+OpenCode 플러그인은 Bun ESM 런타임에서 실행되므로 Node.js 번들링이 불필요합니다.
 
-The staged Vercel output serves the standalone webview at `/webview/` and the Linux Allure report at `/reports/allure/`, combining the `e2e`, `server`, and `webview` suites. The GitHub Actions deploy job expects `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` secrets.
+---
 
-### Usage
+## 아키텍처 관점
 
-1. Open the **Pixel Agents** panel (it appears in the bottom panel area alongside your terminal)
-2. Click **+ Agent** to spawn a new Claude Code terminal and its character. Right-click for the option to launch with `--dangerously-skip-permissions` (bypasses all tool approval prompts)
-3. Start coding with Claude — watch the character react in real time
-4. Click a character to select it, then click a seat to reassign it
-5. Click **Layout** to open the office editor and customize your space
+### 설계 원칙 유지
 
-## Layout Editor
+- **HookProvider 인터페이스 무변경**: 기존 계약을 그대로 유지하며 구현체만 추가
+- **런타임 무변경**: `AgentRuntime`은 `additionalProviders` 옵션 파라미터만 추가, 기존 동작 보존
+- **단방향 의존성**: `providers/hook/opencode/`는 `core/`만 참조, 역방향 의존 없음
+- **에러 격리**: 훅 스크립트에서 발생하는 모든 에러는 묵시적으로 처리 — 에이전트 동작 중단 방지
 
-The built-in editor lets you design your office:
+### 추가 프로바이더 온보딩 패턴
 
-- **Floor** — Full HSB color control
-- **Walls** — Auto-tiling walls with color customization
-- **Tools** — Select, paint, erase, place, eyedropper, pick
-- **Undo/Redo** — 50 levels with Ctrl+Z / Ctrl+Y
-- **Export/Import** — Share layouts as JSON files via the Settings modal
+이번 작업으로 새 AI 에이전트 CLI를 추가하는 패턴이 명확해졌습니다:
 
-The grid is expandable up to 64×64 tiles. Click the ghost border outside the current grid to grow it.
+```
+server/src/providers/hook/<id>/
+  <id>.ts                  # HookProvider 구현
+  <id>HookInstaller.ts     # 설치/제거 로직
+  constants.ts             # ID별 상수
+  hooks/<id>-plugin.*      # 훅 스크립트 (런타임에 맞는 형식)
+```
 
-### Office Assets
+`AgentRuntime`, `HookEventHandler`, 웹뷰 UI, 프로토콜 계층은 수정 없이 새 프로바이더를 수용합니다.
 
-All office assets (furniture, floors, walls) are now **fully open-source** and included in this repository under `webview-ui/public/assets/`. No external purchases or imports are needed — everything works out of the box.
+---
 
-Each furniture item lives in its own folder under `assets/furniture/` with a `manifest.json` that declares its sprites, rotation groups, state groups (on/off), and animation frames. Floor tiles are individual PNGs in `assets/floors/`, and wall tile sets are in `assets/walls/`. This modular structure makes it easy to add, remove, or modify assets without touching any code.
+## 남은 작업 / 후속 검토 사항
 
-To add a new furniture item, create a folder in `webview-ui/public/assets/furniture/` with your PNG sprite(s) and a `manifest.json`, then rebuild. The asset manager (`scripts/asset-manager.html`) provides a visual editor for creating and editing manifests.
-
-To use furniture from an external directory, open Settings → **Add Asset Directory**. See [docs/external-assets.md](docs/external-assets.md) for the full manifest format and how to use third-party asset packs.
-
-Characters are based on the amazing work of [JIK-A-4, Metro City](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack).
-
-## How It Works
-
-Pixel Agents has two parallel detection paths:
-
-- **Hooks mode** (preferred) — Claude Code's official Hooks API POSTs events (`SessionStart`, `PreToolUse`, `Notification`, `Stop`, etc.) to a local Fastify server (`POST /api/hooks/:providerId`). Instant, reliable. Server discovery via `~/.pixel-agents/server.json`.
-- **Heuristic mode** (fallback) — Polls JSONL transcript files at `~/.claude/projects/<project-hash>/<session-id>.jsonl`. Used when hooks aren't installed.
-
-A single `HookProvider.normalizeHookEvent(raw)` translates each CLI's hook payload into a canonical `AgentEvent`. The shared `AgentRuntime` dispatches on `AgentEvent.kind`, mutates `AgentStateStore`, and the broadcast layer translates state events into typed `ServerMessage` over the active transport.
-
-The webview runs a lightweight game loop with canvas rendering, BFS pathfinding, and a character state machine (idle → walk → type/read). Everything is pixel-perfect at integer zoom levels. Game state lives in an imperative `OfficeState` class outside React; React components read from it during render but don't own the state.
-
-No modifications to Claude Code are needed — Pixel Agents is purely observational.
-
-## Tech Stack
-
-Four-package monorepo, npm workspaces:
-
-- **`core/`** — TypeScript-only protocol + interfaces (AsyncAPI 3.0 contract, `HookProvider`, `MessageTransport`, `StateAdapter`). Zero runtime side effects.
-- **`server/`** — Fastify v5 (HTTP + WebSocket), Vitest. Owns `AgentRuntime`, `AgentStateStore`, `SessionRouter`, `DismissalTracker`, file watching, transcript parsing, providers. Ships the `npx pixel-agents` CLI.
-- **`adapters/vscode/`** — VS Code Extension API. Composes `core/` + `server/` for the desktop surface.
-- **`webview-ui/`** — React 19, Vite, Canvas 2D. Transport-agnostic (`PostMessageTransport` in VS Code, `WebSocketTransport` in the browser).
-
-Builds: esbuild (extension + CLI + hook scripts), Vite (webview SPA). Tests: Vitest (server + webview unit), Playwright (e2e against real VS Code + standalone Fastify).
-
-## Known Limitations
-
-- **Agent-terminal sync** — the way agents are connected to Claude Code terminal instances is not super robust and sometimes desyncs, especially when terminals are rapidly opened/closed or restored across sessions.
-- **Heuristic-based status detection** — Claude Code's JSONL transcript format does not provide clear signals for when an agent is waiting for user input or when it has finished its turn. The current detection is based on heuristics (idle timers, turn-duration events) and often misfires — agents may briefly show the wrong status or miss transitions.
-- **Linux/macOS tip** — if you launch VS Code without a folder open (e.g. bare `code` command), agents will start in your home directory. This is fully supported; just be aware your Claude sessions will be tracked under `~/.claude/projects/` using your home directory as the project root.
-
-## Troubleshooting
-
-If your agent appears stuck on idle or doesn't spawn:
-
-1. **Debug View** — In the Pixel Agents panel, click the gear icon (Settings), then toggle **Debug View**. This shows connection diagnostics per agent: JSONL file status, lines parsed, last data timestamp, and file path. If you see "JSONL not found", the extension can't locate the session file.
-2. **Debug Console** — If you're running from source (Extension Development Host via F5), open VS Code's **View > Debug Console**. Search for `[Pixel Agents]` to see detailed logs: project directory resolution, JSONL polling status, path encoding mismatches, and unrecognized JSONL record types.
-
-## Where This Is Going
-
-The long-term vision is an interface where managing AI agents feels like playing the Sims, but the results are real things built.
-
-- **Agents as characters** you can see, assign, monitor, and redirect, each with visible roles (designer, coder, writer, reviewer), stats, context usage, and tools.
-- **Desks as directories** — drag an agent to a desk to assign it to a project or working directory.
-- **An office as a project** — with a Kanban board on the wall where idle agents can pick up tasks autonomously.
-- **Deep inspection** — click any agent to see its model, branch, system prompt, and full work history. Interrupt it, chat with it, or redirect it.
-- **Token health bars** — rate limits and context windows visualized as in-game stats.
-- **Fully customizable** — upload your own character sprites, themes, and office assets. Eventually maybe even move beyond pixel art into 3D or VR.
-
-For this to work, the architecture needs to be modular at every level:
-
-- **Platform-agnostic**: VS Code extension today, Electron app, web app, or any other host environment tomorrow.
-- **Agent-agnostic**: Claude Code today, but built to support Codex, OpenCode, Gemini, Cursor, Copilot, and others through composable adapters.
-- **Theme-agnostic**: community-created assets, skins, and themes from any contributor.
-
-We're actively working on the core module and adapter architecture that makes this possible. If you're interested to talk about this further, please visit our [Discussions Section](https://github.com/pixel-agents-hq/pixel-agents/discussions).
-
-## Community & Contributing
-
-Use **[Issues](https://github.com/pixel-agents-hq/pixel-agents/issues)** to report bugs or request features. Join **[Discussions](https://github.com/pixel-agents-hq/pixel-agents/discussions)** for questions and conversations.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on how to contribute.
-
-Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
-
-## Supporting the Project
-
-If you find Pixel Agents useful, consider supporting its development:
-
-<a href="https://github.com/sponsors/pablodelucca">
-  <img src="https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=github" alt="GitHub Sponsors">
-</a>
-<a href="https://ko-fi.com/pablodelucca">
-  <img src="https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=ko-fi" alt="Ko-fi">
-</a>
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=pixel-agents-hq/pixel-agents&type=Date)](https://www.star-history.com/?repos=pixel-agents-hq%2Fpixel-agents&type=date&legend=bottom-right)
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
+- [ ] OpenCode 프로바이더 서버 유닛 테스트 (`server/__tests__/`) 추가
+- [ ] `hookEventHandler.ts`에 멀티 프로바이더 라우팅 테스트 추가
+- [ ] OpenCode `session.created` 이벤트 지원 시 합성 이벤트 로직 제거
+- [ ] `npm run package`로 `.vsix` 빌드 후 실제 OpenCode 환경에서 훅 설치/이벤트 수신 검증
+- [ ] `e2e/README.md` 인벤토리 동기화 (`npm run e2e:inventory`)
